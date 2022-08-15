@@ -1,4 +1,4 @@
-// https://artistic-herring-cc8.notion.site/TelegramBot-445ab86e8ca44b0a9b5c90043eb991df
+// https://artistic-herring-cc8.notion.site/TelegramBot-96dc96659b3a4005a5673b92cadd34cd
 
 import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
@@ -9,6 +9,8 @@ dotenv.config();
 //create .env file with token and chat id
 const { TG_TOKEN, OPEN_WEATHER_API_KEY } = process.env;
 const bot = new TelegramBot(TG_TOKEN, { polling: true });
+let monoCurrencyStore = [];
+let lastUpdated = 0;
 bot.on('message', async (msg) => {
 	const weatherDp = await axios.get('https://api.openweathermap.org/data/2.5/forecast', {
 		params: {
@@ -27,17 +29,28 @@ bot.on('message', async (msg) => {
 		},
 	});
 	let weatherMessage = '';
+	let currencyMsg = '';
 	switch (msg.text) {
 		case '/start':
-			await bot.sendMessage(msg.chat.id, 'Привет, я погодный бот', {
+			await bot.sendMessage(msg.chat.id, 'Привет, я погодно/валютный бот', {
 				reply_markup: {
-					keyboard: [['Прогноз погоды Днепр'], ['Прогноз погоды Запорожье']],
+					keyboard: [['Погода'], ['Валюта']],
 					resize_keyboard: true,
 					one_time_keyboard: true,
 				},
 			});
 			break;
-		case 'Прогноз погоды Днепр':
+		case 'Погода':
+			await bot.sendMessage(msg.chat.id, 'Выберите город', {
+				reply_markup: {
+					keyboard: [['Днепр', 'Запорожье'], ['Главное меню']],
+					resize_keyboard: true,
+					one_time_keyboard: true,
+				},
+			});
+			break;
+
+		case 'Днепр':
 			await bot.sendMessage(msg.chat.id, 'Погода в Днепре', {
 				reply_markup: {
 					keyboard: [
@@ -73,7 +86,7 @@ bot.on('message', async (msg) => {
 				},
 			});
 			break;
-		case 'Прогноз погоды Запорожье':
+		case 'Запорожье':
 			await bot.sendMessage(msg.chat.id, 'Погода в Запорожье', {
 				reply_markup: {
 					keyboard: [
@@ -109,11 +122,40 @@ bot.on('message', async (msg) => {
 				},
 			});
 			break;
+		case 'Валюта':
+			await bot.sendMessage(msg.chat.id, 'Выберите валюту', {
+				reply_markup: {
+					keyboard: [['Доллары', 'Евро'], ['Главное меню']],
+					resize_keyboard: true,
+					one_time_keyboard: false,
+				},
+			});
+			break;
+		case 'Доллары':
+			currencyMsg = await getCurrencyMessage('USD');
+			await bot.sendMessage(msg.chat.id, currencyMsg, {
+				reply_markup: {
+					keyboard: [['Доллары', 'Евро'], ['Главное меню']],
+					resize_keyboard: true,
+					one_time_keyboard: false,
+				},
+			});
+			break;
+		case 'Евро':
+			currencyMsg = await getCurrencyMessage('EUR');
+			await bot.sendMessage(msg.chat.id, currencyMsg, {
+				reply_markup: {
+					keyboard: [['Доллары', 'Евро'], ['Главное меню']],
+					resize_keyboard: true,
+					one_time_keyboard: false,
+				},
+			});
+			break;
 
 		case 'Главное меню':
-			await bot.sendMessage(msg.chat.id, 'Выберите город', {
+			await bot.sendMessage(msg.chat.id, 'Выберите действие', {
 				reply_markup: {
-					keyboard: [['Прогноз погоды Днепр'], ['Прогноз погоды Запорожье']],
+					keyboard: [['Погода'], ['Валюта']],
 					resize_keyboard: true,
 					one_time_keyboard: true,
 				},
@@ -144,7 +186,6 @@ const formatDate = (weather, skipEven = false) => {
 			'\n',
 		])
 		.flat(2);
-	console.log(result);
 	return result;
 };
 
@@ -153,4 +194,52 @@ const tempFormat = (temp) => {
 		return `-${temp}°C`;
 	}
 	return `+${temp}°C`;
+};
+
+const getCurrencyMessage = async (currency) => {
+	let resultMessage = '';
+	const currencyCode = currency === 'USD' ? 840 : 978;
+	const currencyText = currency === 'USD' ? 'доллара' : 'евро';
+	const date = new Date().getTime();
+	const monoCurrency = await axios
+		.get('https://api.monobank.ua/bank/currency')
+		.then((res) => {
+			monoCurrencyStore = res.data;
+			lastUpdated = date;
+		})
+		.catch((err) => {
+			resultMessage = `Ошибка при получении данных о валюте из монобанка, последнее обновление было в ${DateTime.fromMillis(
+				lastUpdated,
+			).toLocaleString(DateTime.DATETIME_SHORT)}\n\n`;
+		});
+	const privatCashCourse = await axios.get(
+		'https://api.privatbank.ua/p24api/pubinfo?exchange&json&coursid=5',
+	);
+	const privatCardCourse = await axios.get(
+		'https://api.privatbank.ua/p24api/pubinfo?exchange&json&coursid=11',
+	);
+	return Promise.all([monoCurrencyStore, privatCashCourse, privatCardCourse]).then(
+		async ([monoCurrency, privatCashCourse, privatCardCourse]) => {
+			const privatCash = privatCashCourse.data.find((item) => item.ccy === currency);
+			const privatCard = privatCardCourse.data.find((item) => item.ccy === currency);
+			if (monoCurrency.length > 0) {
+				const monoCurrencyRate = monoCurrency.find(
+					(item) => item.currencyCodeA === currencyCode,
+				);
+				resultMessage += `Курс ${currencyText} в Монобанке:
+							Покупка: ${monoCurrencyRate.rateBuy} грн.
+							Продажа: ${monoCurrencyRate.rateSell} грн.
+					\n\n`;
+			}
+			resultMessage += `Курс ${currencyText} в Приватбанке:
+				Карточный курс: 
+							покупка - ${privatCard.buy} грн,
+							продажа - ${privatCard.sale} грн.
+				Наличный курс: 
+							покупка - ${privatCash.buy} грн,
+							продажа - ${privatCash.sale} грн.
+			`;
+			return resultMessage;
+		},
+	);
 };
