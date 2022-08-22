@@ -1,3 +1,5 @@
+// https://artistic-herring-cc8.notion.site/CLI-Google-Uploader-1c4a6f9ad7a744898e8616b774debc22
+
 import fs from 'fs';
 import readline from 'readline';
 import { google } from 'googleapis';
